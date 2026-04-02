@@ -1,23 +1,36 @@
-import { createClient } from '@supabase/supabase-js';
+/**
+ * Local leaderboard backed by localStorage.
+ * Keeps the same fetchTopScores / submitScore interface as the old
+ * Supabase version so no other files need to change.
+ * Scores are stored per-device. When Supabase is re-enabled later,
+ * swap this file back for the supabase client version.
+ */
 import type { HighScoreRow } from '../types';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const STORAGE_KEY = 'flappy_rhema_scores';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-export async function fetchTopScores(): Promise<HighScoreRow[]> {
-  const { data, error } = await supabase
-    .from('high_scores')
-    .select('*')
-    .order('score', { ascending: false })
-    .limit(10);
-
-  if (error) {
-    console.error('fetchTopScores error:', error);
+function loadScores(): HighScoreRow[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as HighScoreRow[]) : [];
+  } catch {
     return [];
   }
-  return (data as HighScoreRow[]) ?? [];
+}
+
+function saveScores(rows: HighScoreRow[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+  } catch {
+    // storage full or unavailable – silently ignore
+  }
+}
+
+export async function fetchTopScores(): Promise<HighScoreRow[]> {
+  const all = loadScores();
+  return all
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10);
 }
 
 export async function submitScore(
@@ -25,13 +38,15 @@ export async function submitScore(
   score: number,
   theme: string
 ): Promise<boolean> {
-  const { error } = await supabase
-    .from('high_scores')
-    .insert([{ name: name.slice(0, 15), score, theme }]);
-
-  if (error) {
-    console.error('submitScore error:', error);
-    return false;
-  }
+  const rows = loadScores();
+  const entry: HighScoreRow = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    name: name.slice(0, 15),
+    score,
+    theme,
+    created_at: new Date().toISOString(),
+  };
+  rows.push(entry);
+  saveScores(rows);
   return true;
 }
